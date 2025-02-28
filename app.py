@@ -1,5 +1,5 @@
 import os
-import chainlit as cl
+import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -7,7 +7,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+    )
 
 # Define the system prompt for mental health focus
 SYSTEM_PROMPT = """You are a compassionate and knowledgeable mental health assistant. Your role is to:
@@ -21,59 +23,64 @@ SYSTEM_PROMPT = """You are a compassionate and knowledgeable mental health assis
 
 Important: Always include a disclaimer when appropriate that you are an AI assistant and not a replacement for professional mental health care."""
 
+# Initialize session state for message history
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "assistant", "content": "Hello! I'm here to discuss mental health topics and provide support. "
+         "While I can offer information and general guidance, please remember that I'm an AI assistant "
+         "and not a substitute for professional mental health care. How can I help you today?"}
+    ]
 
+# Set page configuration
+st.set_page_config(
+    page_title="Mental Health Assistant",
+    page_icon="🧠",
+    layout="wide"
+)
 
-@cl.on_chat_start
-async def start_chat():
-    """Initialize the chat session with system prompt."""
-    # Initialize message history in the session
-    cl.user_session.set("messages", [
-        {"role": "system", "content": SYSTEM_PROMPT}
-    ])
-    
-    await cl.Message(
-        content="Hello! I'm here to discuss mental health topics and provide support. "
-        "While I can offer information and general guidance, please remember that I'm an AI assistant "
-        "and not a substitute for professional mental health care. How can I help you today?"
-    ).send()
+# Main title in the app
+st.title("Mental Health Assistant")
 
-async def call_openai(query: str):
-    """Handle the OpenAI API call and message management."""
-    # Get current message history
-    messages = cl.user_session.get("messages")
-    # Add user message to history
-    messages.append({"role": "user", "content": query})
-    
-    # Create message with empty content for streaming
-    msg = cl.Message(content="", author="Assistant")
-    
-    try:
-        # Get response from OpenAI
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=800,
-            stream=True
-        )
+# Display chat messages
+for message in st.session_state.messages:
+    if message["role"] != "system":
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+
+# Chat input
+if prompt := st.chat_input("What's on your mind?"):
+    # Add user message to chat
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.write(prompt)
+
+    # Generate and display assistant response
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
         
-        # Stream the response
-        for chunk in response:
-            if chunk.choices[0].delta.content:
-                await msg.stream_token(chunk.choices[0].delta.content)
-                
-        # Send the complete message
-        await msg.send()
-        
-        # Add assistant's response to message history
-        messages.append({"role": "assistant", "content": msg.content})
-        cl.user_session.set("messages", messages)
-        
-    except Exception as e:
-        error_message = f"I apologize, but I encountered an error: {str(e)}"
-        await cl.Message(content=error_message).send()
-
-@cl.on_message
-async def chat(message: cl.Message):
-    """Process incoming messages."""
-    await call_openai(message.content) 
+        try:
+            # Get response from OpenAI
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=st.session_state.messages,
+                temperature=0.7,
+                max_tokens=800,
+                stream=True
+            )
+            
+            # Stream the response
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+                    message_placeholder.write(full_response + "▌")
+            
+            message_placeholder.write(full_response)
+            
+            # Add assistant's response to message history
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+        except Exception as e:
+            error_message = f"I apologize, but I encountered an error: {str(e)}"
+            st.error(error_message) 
